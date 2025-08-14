@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Premium Inventory Manager</title>
+<style>
+:root {
+    --primary: #4CAF50;
+    --secondary: #f8f9fa;
+    --text: #333;
+    --border: #e0e0e0;
+    --hover: #f9f9f9;
+    --error: #d32f2f;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+body { display: flex; min-height: 100vh; background-color: #f5f5f5; color: var(--text); }
+/* Sidebar */
+.sidebar { width: 320px; background: white; padding: 25px; box-shadow: 2px 0 15px rgba(0,0,0,0.08); position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+.sidebar-header { margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px solid var(--border); }
+.sidebar-header h2 { color: var(--primary); font-weight: 600; }
+.filter-section { margin-bottom: 25px; }
+.value-list { max-height: 50vh; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 20px; transition: max-height 0.3s ease; }
+.field-filter-item { padding: 12px 15px; border-bottom: 1px solid var(--border); cursor: pointer; display: flex; align-items: center; justify-content: space-between; transition: background-color 0.2s; }
+.field-filter-item:hover { background-color: var(--hover); }
+.field-filter-item.active { background-color: #e8f5e9; font-weight: 500; }
+.field-filter-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding-bottom: 5px; border-bottom: 1px solid var(--border); }
+.field-filter-title { font-weight: 600; color: var(--primary); }
+.filter-count { background: var(--primary); color: white; font-size: 12px; padding: 2px 6px; border-radius: 12px; }
+.show-more { padding: 10px; text-align: center; color: var(--primary); cursor: pointer; font-size: 14px; }
+.show-more:hover { text-decoration: underline; }
+.filter-search { width: 100%; padding: 8px; margin-bottom: 8px; border: 1px solid var(--border); border-radius: 4px; font-size: 14px; }
+.highlight { background: yellow; }
+/* Main Content */
+.main-content { flex: 1; padding: 30px; background-color: white; }
+.content-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px solid var(--border); }
+.content-header h1 { font-weight: 600; }
+.results-count { color: #666; font-size: 14px; }
+.results-table { width: 100%; border-collapse: collapse; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+.results-table th { background: var(--primary); color: white; padding: 15px; text-align: left; }
+.results-table td { padding: 15px; border-bottom: 1px solid var(--border); }
+.results-table tr:hover { background-color: var(--hover); }
+.no-data { padding: 40px; text-align: center; color: #666; font-style: italic; background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+/* Responsive */
+@media (max-width: 768px) {
+    body { flex-direction: column; }
+    .sidebar { width: 100%; height: auto; }
+    .main-content { padding: 20px; }
+    .results-table td, .results-table th { font-size: 13px; }
+}
+</style>
+</head>
+<body>
+<div class="sidebar">
+    <div class="sidebar-header">
+        <h2>Inventory Filters</h2>
+    </div>
+    <div id="fieldFiltersContainer"></div>
+</div>
+<div class="main-content">
+    <div class="content-header">
+        <h1>Inventory Results</h1>
+        <div class="results-count" id="resultsCount">0 items found</div>
+    </div>
+    <div id="summaryTable">
+        <div class="no-data">Please select filters from the sidebar</div>
+    </div>
+</div>
+<script>
+const API_URL = '/api/products';
+const API_KEY = 'premium789'; // This should match your config.py API_KEY
+let inventoryData = [];
+let allFields = [];
+let fieldFilters = {};
+let activeFilters = {};
+
+document.addEventListener('DOMContentLoaded', async () => {
+    await loadData();
+    setupFieldFilters();
+    setupEventListeners();
+});
+
+async function loadData() {
+    try {
+        const res = await fetch(API_URL, {
+            headers: {
+                'X-API-KEY': API_KEY
+            }
+        });
+        
+        if (!res.ok) {
+            throw new Error(`API request failed: ${res.status}`);
+        }
+        
+        const result = await res.json();
+        inventoryData = result.data || [];
+        allFields = Object.keys(inventoryData[0] || {}).filter(f =>
+            f !== 'id' && !/cost|price/i.test(f)
+        );
+    } catch (error) {
+        console.error('Error loading data:', error);
+        alert('Failed to load inventory data. Check console for details.');
+    }
+}
+
+function setupFieldFilters() {
+    const container = document.getElementById('fieldFiltersContainer');
+    container.innerHTML = '';
+    allFields.forEach(field => {
+        const values = [...new Set(inventoryData.map(i => i[field]?.toString() || 'NULL'))]
+            .sort((a,b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+        fieldFilters[field] = values;
+        const filterSection = document.createElement('div');
+        filterSection.className = 'filter-section';
+        filterSection.innerHTML = `
+            <div class="field-filter-header">
+                <div class="field-filter-title">${formatFieldName(field)}</div>
+                <div class="filter-count" id="count_${field}" style="display:none">0</div>
+            </div>
+            <input type="text" class="filter-search" placeholder="Search ${formatFieldName(field)}" data-field="${field}">
+            <div class="value-list" id="values_${field}">
+                ${values.slice(0,5).map(v => renderFilterItem(field,v)).join('')}
+                ${values.length>5?`<div class="show-more" data-field="${field}" data-expanded="false">Show more (${values.length-5})</div>`:''}
+            </div>
+        `;
+        container.appendChild(filterSection);
+    });
+}
+
+function renderFilterItem(field,value,active=false,term=''){
+    let displayValue = value;
+    if(term){
+        const regex = new RegExp(`(${term})`,'ig');
+        displayValue = value.replace(regex,'<span class="highlight">$1</span>');
+    }
+    return `<div class="field-filter-item ${active?'active':''}" data-field="${field}" data-value="${value}">
+        <label>${displayValue}</label>
+    </div>`;
+}
+
+function formatFieldName(f){
+    return f.replace(/([A-Z])/g,' $1').replace(/^./,s=>s.toUpperCase());
+}
+
+function setupEventListeners(){
+    document.addEventListener('click',e=>{
+        const item = e.target.closest('.field-filter-item');
+        if(item){
+            const field = item.dataset.field;
+            const value = item.dataset.value;
+            if(!activeFilters[field]) activeFilters[field] = new Set();
+            if(activeFilters[field].has(value)){
+                activeFilters[field].delete(value);
+                item.classList.remove('active');
+            } else {
+                activeFilters[field].add(value);
+                item.classList.add('active');
+            }
+            updateFilterCount(field);
+            applyFilters();
+        }
+        const showMore = e.target.closest('.show-more');
+        if(showMore){
+            const field = showMore.dataset.field;
+            const expanded = showMore.dataset.expanded === 'true';
+            const searchTerm = document.querySelector(`.filter-search[data-field="${field}"]`).value.trim().toLowerCase();
+            const values = fieldFilters[field].filter(v => v.toLowerCase().includes(searchTerm));
+            const container = document.getElementById(`values_${field}`);
+            if(expanded){
+                container.innerHTML = values.slice(0,5).map(v =>
+                    renderFilterItem(field,v,activeFilters[field]?.has(v),searchTerm)
+                ).join('') + (values.length>5?`<div class="show-more" data-field="${field}" data-expanded="false">Show more (${values.length-5})</div>`:'');
+            } else {
+                container.innerHTML = values.map(v =>
+                    renderFilterItem(field,v,activeFilters[field]?.has(v),searchTerm)
+                ).join('') + `<div class="show-more" data-field="${field}" data-expanded="true">Show less</div>`;
+            }
+        }
+    });
+
+    document.addEventListener('input',e=>{
+        if(e.target.classList.contains('filter-search')){
+            const field = e.target.dataset.field;
+            const term = e.target.value.trim().toLowerCase();
+            const values = fieldFilters[field].filter(v => v.toLowerCase().includes(term));
+            const container = document.getElementById(`values_${field}`);
+            container.innerHTML = values.slice(0,5).map(v =>
+                renderFilterItem(field,v,activeFilters[field]?.has(v),term)
+            ).join('') + (values.length>5?`<div class="show-more" data-field="${field}" data-expanded="false">Show more (${values.length-5})</div>`:'');
+        }
+    });
+}
+
+function updateFilterCount(field){
+    const count = activeFilters[field]?.size || 0;
+    const badge = document.getElementById(`count_${field}`);
+    if(count>0){
+        badge.textContent = count;
+        badge.style.display = 'inline-block';
+    } else {
+        badge.style.display = 'none';
+    }
+}
+
+function applyFilters(){
+    const activeFields = Object.keys(activeFilters).filter(f=>activeFilters[f].size>0);
+    if(activeFields.length===0){
+        document.getElementById('summaryTable').innerHTML = '<div class="no-data">Please select filters from the sidebar</div>';
+        updateResultsCount(0);
+        return;
+    }
+    let filtered = inventoryData;
+    activeFields.forEach(field=>{
+        filtered = filtered.filter(item=>{
+            const val = (item[field]?.toString() || 'NULL').toLowerCase();
+            return Array.from(activeFilters[field]).some(v=>v.toLowerCase()===val);
+        });
+    });
+    renderResults(filtered);
+    updateResultsCount(filtered.length);
+}
+
+function renderResults(data){
+    const container = document.getElementById('summaryTable');
+    if(!data.length){
+        container.innerHTML = '<div class="no-data">No matching items found</div>';
+        return;
+    }
+    container.innerHTML = `
+    <table class="results-table">
+        <thead>
+            <tr><th>Barcode</th><th>Product</th><th>Warehouse</th><th>Quantity</th><th>Price</th></tr>
+        </thead>
+        <tbody>
+            ${data.map(i=>`
+            <tr>
+                <td>${i.BarcodeNo || 'N/A'}</td>
+                <td>${i.Product || 'N/A'}</td>
+                <td>${i.Warehouse || 'N/A'}</td>
+                <td>${i.Qty || 0}</td>
+                <td>${i.MRP ? '₹'+Number(i.MRP).toFixed(2) : 'N/A'}</td>
+            </tr>`).join('')}
+        </tbody>
+    </table>`;
+}
+
+function updateResultsCount(c){
+    document.getElementById('resultsCount').textContent = `${c} ${c===1?'item':'items'} found`;
+}
+</script>
+</body>
+</html>
