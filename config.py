@@ -8,4 +8,4 @@ DB_CONFIG = {
     "pool_size": 5  # Adjust based on your server capacity
 }
 
-API_KEY = "PrEmCoMpUtInG@123DaTaSaFe"  # Change this to a strong secret key
+API_KEY = ""  # Change this to a strong secret key
